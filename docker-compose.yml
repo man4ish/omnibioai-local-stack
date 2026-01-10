@@ -1,0 +1,133 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: omnibioai-mysql
+    environment:
+      MYSQL_DATABASE: omnibioai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: omnibioai-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  toolserver:
+    build:
+      context: ../omnibioai-toolserver
+    container_name: omnibioai-toolserver
+    environment:
+      # optional: add toolserver config later
+      TOOLSERVER_RUN_STORE_DIR: /workspace/omnibioai-toolserver/out/runs
+    ports:
+      - "${TOOLSERVER_PORT:-9090}:9090"
+    volumes:
+      - workspace:/workspace
+    command: >
+      uvicorn toolserver_app:create_app
+      --factory
+      --host 0.0.0.0
+      --port 9090
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:9090/health | grep -q '\"ok\":true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  tes:
+    build:
+      context: ../omnibioai-tool-exec
+    container_name: omnibioai-tes
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      TES_UPGRADE: "0"
+      # If TES needs to talk to toolserver:
+      TOOLSERVER_BASE_URL: http://toolserver:9090
+      # If TES writes outputs:
+      TES_WORKDIR: /workspace/omnibioai-tool-exec/out
+    ports:
+      - "${TES_PORT:-8080}:8080"
+    volumes:
+      - workspace:/workspace
+    # Adjust this to whatever your repo uses to start TES reliably
+    command: ["bash", "-lc", "./scripts/restart_tes.sh"]
+    depends_on:
+      toolserver:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:8080/health | grep -q 'ok' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  omnibioai:
+    build:
+      context: ../omnibioai
+    container_name: omnibioai-workbench
+    environment:
+      DEBUG: "1"
+      # Django
+      DJANGO_SETTINGS_MODULE: omnibioai.settings
+
+      # DB
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: omnibioai
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+
+      # Redis / Celery / Channels
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+
+      # Service endpoints (use docker DNS names)
+      TES_BASE_URL: http://tes:8080
+      TOOLSERVER_BASE_URL: http://toolserver:9090
+
+      # Path policy: single mounted workspace root inside containers
+      WORKSPACE_ROOT: /workspace
+    ports:
+      - "${WORKBENCH_PORT:-8000}:8000"
+    volumes:
+      - workspace:/workspace
+    depends_on:
+      tes:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    # Dev-mode runserver; later swap to gunicorn/uvicorn for prod-like
+    command: ["bash", "-lc", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:8000/ | head -n 1 >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  mysql_data:
+  workspace:
+    driver: local
+
