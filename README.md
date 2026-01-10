@@ -37,6 +37,7 @@ Desktop/machine/
 
 ## Architecture
 
+```mermaid
 flowchart LR
   %% Clients
   U[User / Browser]
@@ -86,7 +87,7 @@ flowchart LR
   TES --> WS
   WS --> Runs
   WS --> Registry
-
+```
 
 ---
 
