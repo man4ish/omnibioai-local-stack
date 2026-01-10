@@ -28,25 +28,22 @@ Desktop/machine/
 │   ├── omnibioai.sql
 │   └── limsdb.sql
 ├── docker-compose.yml         # Full local stack (Docker Compose)
+├── .env.example               # Environment variable template
 ├── backup/                    # Archived / experimental work
 └── ai-dev-docker/             # Docker experiments (optional)
 ```
 
 ---
 
-## Architecture (Mermaid)
+## Architecture
 
 ```mermaid
 flowchart LR
-  %% =========================
   %% Clients
-  %% =========================
   U[User / Browser]
   Dev[Developer CLI<br/>(tmux / curl)]
 
-  %% =========================
-  %% Core Services
-  %% =========================
+  %% Application Services
   subgraph Apps["Application Services"]
     WB["OmniBioAI Workbench<br/>(Django + ASGI/Channels)<br/>:8000"]
     LS["LIMS-X<br/>(Django)<br/>:7000"]
@@ -54,60 +51,49 @@ flowchart LR
     TES["TES<br/>(Tool Execution Service)<br/>:8080"]
   end
 
-  %% =========================
-  %% Infra
-  %% =========================
+  %% Infrastructure
   subgraph Infra["Infrastructure"]
     MySQL["MySQL 8<br/>DBs: omnibioai + limsdb<br/>:3306"]
     Redis["Redis<br/>Celery + Channels<br/>:6379"]
   end
 
-  %% =========================
-  %% Shared Workspace Volume (Docker) / Shared FS (local)
-  %% =========================
+  %% Shared Storage
   subgraph Storage["Shared Workspace"]
-    WS["/workspace (docker volume)<br/>or ~/Desktop/machine (local)"]
-    Runs["Runs / Outputs<br/>TES_WORKDIR, ToolServer run store"]
-    Registry["Registries / Objects<br/>relative paths only"]
+    WS["/workspace (Docker volume)<br/>or ~/Desktop/machine (local)"]
+    Runs["Workflow Runs / Outputs"]
+    Registry["Registries / Provenance<br/>(relative paths only)"]
   end
 
-  %% =========================
   %% Client traffic
-  %% =========================
-  U -->|HTTP| WB
-  U -->|HTTP| LS
-  Dev -->|HTTP| TS
-  Dev -->|HTTP| TES
+  U --> WB
+  U --> LS
+  Dev --> TS
+  Dev --> TES
 
-  %% =========================
-  %% Service-to-service calls
-  %% =========================
-  WB -->|submit jobs / poll| TES
-  TES -->|tool execution| TS
+  %% Service calls
+  WB --> TES
+  TES --> TS
 
-  %% =========================
   %% Data plane
-  %% =========================
-  WB -->|ORM| MySQL
-  LS -->|ORM| MySQL
+  WB --> MySQL
+  LS --> MySQL
+  WB --> Redis
+  TES --> Redis
 
-  WB -->|Channels / Celery| Redis
-  TES -->|optional queue / state| Redis
-
-  %% Shared workspace mounts
+  %% Shared filesystem
   WB --> WS
   LS --> WS
   TS --> WS
   TES --> WS
-
   WS --> Runs
   WS --> Registry
+```
 
 ---
 
 ## Canonical Repositories
 
-Each service must be cloned independently. This workspace assumes the following repositories:
+Each service must be cloned independently:
 
 | Component                        | Repository                                                                                         |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -117,46 +103,58 @@ Each service must be cloned independently. This workspace assumes the following 
 | **LIMS-X**                       | [https://github.com/man4ish/lims-x](https://github.com/man4ish/lims-x)                             |
 | **RAGBio**                       | [https://github.com/man4ish/ragbio](https://github.com/man4ish/ragbio)                             |
 
-This repository **only orchestrates** these projects; it does not replace them.
+This repository **only orchestrates** these projects.
 
 ---
 
 ## Design Principles
 
 * **Single workspace root**
-* **Relative paths only** in registries and metadata
+* **Relative paths only**
 * **No hardcoded absolute paths**
 * **Service isolation via ports**
 * **Restart-safe startup**
-* **Docker + non-Docker parity**
+* **Docker ↔ non-Docker parity**
 
 This makes the workspace:
 
 * Portable across machines
 * Safe to rename or relocate
 * Suitable for Docker, HPC, or VM environments
-* Stable across long-running research workflows
+* Stable for long-running research workflows
 
 ---
 
 ## Services & Ports
 
-| Service             | Repo                   | Default Port | Description                |
-| ------------------- | ---------------------- | ------------ | -------------------------- |
-| OmniBioAI Workbench | `omnibioai`            | `8000`       | Django UI, plugins, agents |
-| TES                 | `omnibioai-tool-exec`  | `8080`       | Workflow & tool execution  |
-| ToolServer          | `omnibioai-toolserver` | `9090`       | FastAPI tool APIs          |
-| LIMS-X              | `lims-x`               | `7000`       | LIMS integration           |
-| MySQL               | shared                 | `3306`       | omnibioai + limsdb         |
-| Redis               | shared                 | `6379`       | Celery, channels           |
+| Service             | Default Port | Description                |
+| ------------------- | ------------ | -------------------------- |
+| OmniBioAI Workbench | 8000         | Django UI, plugins, agents |
+| TES                 | 8080         | Workflow & tool execution  |
+| ToolServer          | 9090         | FastAPI tool APIs          |
+| LIMS-X              | 7000         | LIMS integration           |
+| MySQL               | 3306         | omnibioai + limsdb         |
+| Redis               | 6379         | Celery, Channels           |
 
-All ports are configurable via environment variables.
+All ports are configurable via `.env`.
+
+---
+
+## Environment Configuration
+
+Copy the template:
+
+```bash
+cp .env.example .env
+```
+
+Edit values as needed (ports, secrets, database credentials).
 
 ---
 
 ## Docker-Based Workflow (Recommended)
 
-### 1. Build All Docker Images
+### 1. Build All Images
 
 From the workspace root:
 
@@ -164,91 +162,58 @@ From the workspace root:
 docker compose build
 ```
 
-This builds:
+Each service builds from its **own repo-local Dockerfile**.
 
-* `omnibioai-workbench`
-* `omnibioai-toolserver`
-* `omnibioai-tes`
-* `lims-x`
-* MySQL + Redis (official images)
-
-Each service maintains its **own Dockerfile in its own repo**.
+> ⚠️ **Note**
+> Ensure large data directories (e.g. `data/`, `mlruns/`, `results/`) are excluded via `.dockerignore` in each repo to avoid multi-GB build contexts.
 
 ---
 
 ### 2. Export Existing Databases (One-Time)
 
-If you already have local MySQL databases, export them:
-
 ```bash
-# OmniBioAI database
 mysqldump -u root -p omnibioai > db-init/omnibioai.sql
-
-# LIMS-X database
 mysqldump -u root -p limsdb > db-init/limsdb.sql
 ```
 
-These dumps are **automatically imported** by MySQL when Docker Compose starts.
-
-> ⚠️ This happens **only on first startup** or when volumes are removed.
+These dumps are automatically imported by MySQL **on first startup**.
 
 ---
 
-### 3. Start the Full Stack (Docker Compose)
+### 3. Start the Full Stack
 
 ```bash
 docker compose up
 ```
 
-Or rebuild everything cleanly:
+Or clean rebuild:
 
 ```bash
 docker compose down -v
 docker compose up --build
 ```
 
-This launches:
-
-* MySQL (with `omnibioai` + `limsdb`)
-* Redis
-* ToolServer
-* TES
-* OmniBioAI Workbench
-* LIMS-X
-
 ---
 
 ### 4. Verify Health
 
 ```bash
-curl http://localhost:9090/health   # ToolServer
-curl http://localhost:8080/health   # TES
-curl http://localhost:8000/         # OmniBioAI
-curl http://localhost:7000/         # LIMS-X
+curl http://localhost:9090/health
+curl http://localhost:8080/health
+curl http://localhost:8000/
+curl http://localhost:7000/
 ```
 
 ---
 
 ## One-Command Startup (Non-Docker)
 
-For local development without containers:
-
 ```bash
 bash start_stack_tmux.sh
-```
-
-This:
-
-1. Frees required ports
-2. Creates a `tmux` session
-3. Starts all services directly
-4. Runs smoke tests
-
-Attach:
-
-```bash
 tmux attach -t omnibioai
 ```
+
+Ideal for fast local iteration without containers.
 
 ---
 
@@ -259,69 +224,36 @@ All persisted paths **must be relative** to the workspace root.
 ✅ Correct:
 
 ```json
-{
-  "path": "omnibioai/work/results/run_001"
-}
+{ "path": "omnibioai/work/results/run_001" }
 ```
 
 ❌ Incorrect:
 
 ```json
-{
-  "path": "/home/manish/Desktop/machine/omnibioai/..."
-}
+{ "path": "/home/manish/Desktop/machine/omnibioai/..." }
 ```
 
-This guarantees:
-
-* Docker compatibility
-* HPC compatibility
-* Repo rename safety
-* Stable provenance tracking
+This ensures Docker, HPC, and rename safety.
 
 ---
 
 ## Database Model
-
-A **single MySQL container** hosts **multiple logical databases**:
 
 | Database    | Used By             |
 | ----------- | ------------------- |
 | `omnibioai` | OmniBioAI Workbench |
 | `limsdb`    | LIMS-X              |
 
-No cross-contamination, no duplicate containers.
-
----
-
-## Repository Renaming Notes (Historical)
-
-| Old Name                       | New Name    |
-| ------------------------------ | ----------- |
-| `omnibioai_workbench`          | `omnibioai` |
-| `LIMS-X`                       | `lims-x`    |
-| `rag-gene-discovery-assistant` | `ragbio`    |
-
-All internal references have been updated.
+Single MySQL container, multiple logical databases.
 
 ---
 
 ## Quick Debug Commands
 
 ```bash
-# Ports
-lsof -i :8000
-lsof -i :8080
-lsof -i :9090
-lsof -i :7000
-
-# Docker logs
 docker compose logs -f omnibioai
 docker compose logs -f mysql
-
-# Reset everything
-docker compose down -v
-docker compose up --build
+lsof -i :8000 :8080 :9090 :7000
 ```
 
 ---
@@ -329,21 +261,10 @@ docker compose up --build
 ## Status
 
 ✅ Clean workspace
-
 ✅ Docker + non-Docker parity
-
 ✅ Multi-database MySQL
-
 ✅ No absolute paths
-
 ✅ Production-leaning architecture
 
 This repository acts as the **local control plane** for the OmniBioAI ecosystem.
 
-
-## Notes:
-- **WB** calls **TES** for workflow/tool execution and polls run status.
-- **TES** calls **ToolServer** for concrete tool APIs (Enrichr/BLAST/etc.).
-- **WB** and **LIMS-X** share the same **MySQL** service but use **separate databases** (`omnibioai`, `limsdb`).
-- All persisted paths should be **relative to the workspace root** to keep the stack portable across machines and Docker.
-- In Docker Compose, all services share the same mounted volume at `/workspace`.
