@@ -34,6 +34,77 @@ Desktop/machine/
 
 ---
 
+## Architecture (Mermaid)
+
+```mermaid
+flowchart LR
+  %% =========================
+  %% Clients
+  %% =========================
+  U[User / Browser]
+  Dev[Developer CLI<br/>(tmux / curl)]
+
+  %% =========================
+  %% Core Services
+  %% =========================
+  subgraph Apps["Application Services"]
+    WB["OmniBioAI Workbench<br/>(Django + ASGI/Channels)<br/>:8000"]
+    LS["LIMS-X<br/>(Django)<br/>:7000"]
+    TS["ToolServer<br/>(FastAPI + Uvicorn)<br/>:9090"]
+    TES["TES<br/>(Tool Execution Service)<br/>:8080"]
+  end
+
+  %% =========================
+  %% Infra
+  %% =========================
+  subgraph Infra["Infrastructure"]
+    MySQL["MySQL 8<br/>DBs: omnibioai + limsdb<br/>:3306"]
+    Redis["Redis<br/>Celery + Channels<br/>:6379"]
+  end
+
+  %% =========================
+  %% Shared Workspace Volume (Docker) / Shared FS (local)
+  %% =========================
+  subgraph Storage["Shared Workspace"]
+    WS["/workspace (docker volume)<br/>or ~/Desktop/machine (local)"]
+    Runs["Runs / Outputs<br/>TES_WORKDIR, ToolServer run store"]
+    Registry["Registries / Objects<br/>relative paths only"]
+  end
+
+  %% =========================
+  %% Client traffic
+  %% =========================
+  U -->|HTTP| WB
+  U -->|HTTP| LS
+  Dev -->|HTTP| TS
+  Dev -->|HTTP| TES
+
+  %% =========================
+  %% Service-to-service calls
+  %% =========================
+  WB -->|submit jobs / poll| TES
+  TES -->|tool execution| TS
+
+  %% =========================
+  %% Data plane
+  %% =========================
+  WB -->|ORM| MySQL
+  LS -->|ORM| MySQL
+
+  WB -->|Channels / Celery| Redis
+  TES -->|optional queue / state| Redis
+
+  %% Shared workspace mounts
+  WB --> WS
+  LS --> WS
+  TS --> WS
+  TES --> WS
+
+  WS --> Runs
+  WS --> Registry
+
+---
+
 ## Canonical Repositories
 
 Each service must be cloned independently. This workspace assumes the following repositories:
@@ -258,9 +329,21 @@ docker compose up --build
 ## Status
 
 ✅ Clean workspace
+
 ✅ Docker + non-Docker parity
+
 ✅ Multi-database MySQL
+
 ✅ No absolute paths
+
 ✅ Production-leaning architecture
 
 This repository acts as the **local control plane** for the OmniBioAI ecosystem.
+
+
+## Notes:
+- **WB** calls **TES** for workflow/tool execution and polls run status.
+- **TES** calls **ToolServer** for concrete tool APIs (Enrichr/BLAST/etc.).
+- **WB** and **LIMS-X** share the same **MySQL** service but use **separate databases** (`omnibioai`, `limsdb`).
+- All persisted paths should be **relative to the workspace root** to keep the stack portable across machines and Docker.
+- In Docker Compose, all services share the same mounted volume at `/workspace`.
