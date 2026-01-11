@@ -1,12 +1,13 @@
 # ---- External repos (DO NOT TRACK) ----
-omnibioai/
-lims-x/
-omnibioai-tool-exec/
-omnibioai-toolserver/
-ragbio/
-ai-dev-docker/
-backup/
-
+omnibioai/*
+lims-x/*
+omnibioai-tool-exec/*
+omnibioai-toolserver/*
+ragbio/*
+ai-dev-docker/*
+backup/*
+aws-tools/*
+db-init/*.sql
 # ---- Runtime / outputs ----
 **/out/
 **/logs/
@@ -20,5 +21,3 @@ backup/
 .venv
 *.log
 .DS_Store
-db-init/*.sql
-aws-tools/*
