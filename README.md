@@ -1,25 +1,28 @@
 # OmniBioAI Local Development Workspace
 
-This repository defines a **local development workspace and orchestration layer** for the **OmniBioAI ecosystem**, including workflow execution, tool services, LIMS integration, and AI-driven bioinformatics applications.
+This repository defines a **local development workspace and orchestration layer** for the **OmniBioAI ecosystem**, including workflow execution, tool services, LIMS integration, AI-driven bioinformatics applications, and developer-facing utilities.
 
 All services are designed to run **locally**, **without mandatory cloud dependencies**, using a shared workspace layout and reproducible startup mechanisms.
 
 > **Important**
 >
-> This repository does **not** vendor or embed application source code.
+> This repository does **not** vendor or embed core application source code.
 > Each major component lives in its **own GitHub repository** and is referenced here explicitly.
+> This repository acts as a **local control plane and workspace coordinator**.
 
 ---
 
 ## Workspace Layout
 
-```
+```text
 Desktop/machine/
 ├── omnibioai/                 # OmniBioAI Workbench (Django)
 ├── omnibioai-tool-exec/       # TES – Tool Execution Service
 ├── omnibioai-toolserver/      # FastAPI ToolServer (Enrichr, BLAST, etc.)
 ├── lims-x/                    # LIMS-X (Laboratory Information Management)
 ├── ragbio/                    # RAG-based Bioinformatics Assistant
+├── omnibioai_sdk/             # Python SDK for OmniBioAI APIs
+├── aws-tools/                 # Cloud / infrastructure helper tools (optional)
 ├── utils/
 │   └── kill_port.sh           # Utility to free busy ports
 ├── smoke_test_stack.sh        # Health checks for the full stack
@@ -41,7 +44,7 @@ Desktop/machine/
 flowchart LR
   %% Clients
   U[User / Browser]
-  Dev[Developer CLI]
+  Dev[Developer CLI / SDK]
 
   %% Application Services
   subgraph Apps[Application Services]
@@ -66,7 +69,7 @@ flowchart LR
 
   %% Client traffic
   U --> WB
-  U --> LS
+  Dev --> WB
   Dev --> TS
   Dev --> TES
 
@@ -93,7 +96,7 @@ flowchart LR
 
 ## Canonical Repositories
 
-Each service must be cloned independently:
+Each component must be cloned independently.
 
 | Component                        | Repository                                                                                         |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -102,8 +105,40 @@ Each service must be cloned independently:
 | **ToolServer**                   | [https://github.com/man4ish/omnibioai-toolserver](https://github.com/man4ish/omnibioai-toolserver) |
 | **LIMS-X**                       | [https://github.com/man4ish/lims-x](https://github.com/man4ish/lims-x)                             |
 | **RAGBio**                       | [https://github.com/man4ish/ragbio](https://github.com/man4ish/ragbio)                             |
+| **OmniBioAI SDK**                | [https://github.com/man4ish/omnibioai_sdk](https://github.com/man4ish/omnibioai_sdk)               |
 
 This repository **only orchestrates** these projects.
+
+---
+
+## Developer SDK & Utilities
+
+### OmniBioAI SDK
+
+`omnibioai_sdk/` provides a lightweight Python SDK for interacting with OmniBioAI APIs, including:
+
+* Object registry access
+* Development APIs (`/api/dev/*`)
+* Notebook-based analysis workflows
+
+The SDK is published independently on **PyPI** and is intended for:
+
+* Jupyter notebooks
+* Python scripts
+* Workflow tooling
+* Programmatic access to the OmniBioAI platform
+
+> The SDK is a **thin client** and does not embed backend logic.
+
+### AWS Tools (Optional)
+
+`aws-tools/` contains experimental and optional utilities for:
+
+* Cloud execution
+* Infrastructure prototyping
+* Deployment experiments
+
+These tools are **not required** for local development and may change independently.
 
 ---
 
@@ -156,8 +191,6 @@ Edit values as needed (ports, secrets, database credentials).
 
 ### 1. Build All Images
 
-From the workspace root:
-
 ```bash
 docker compose build
 ```
@@ -165,7 +198,7 @@ docker compose build
 Each service builds from its **own repo-local Dockerfile**.
 
 > ⚠️ **Note**
-> Ensure large data directories (e.g. `data/`, `mlruns/`, `results/`) are excluded via `.dockerignore` in each repo to avoid multi-GB build contexts.
+> Exclude large data directories via `.dockerignore` in each repo to avoid multi-GB build contexts.
 
 ---
 
@@ -176,7 +209,7 @@ mysqldump -u root -p omnibioai > db-init/omnibioai.sql
 mysqldump -u root -p limsdb > db-init/limsdb.sql
 ```
 
-These dumps are automatically imported by MySQL **on first startup**.
+These dumps are imported automatically on first startup.
 
 ---
 
@@ -267,4 +300,3 @@ lsof -i :8000 :8080 :9090 :7000
 ✅ Production-leaning architecture
 
 This repository acts as the **local control plane** for the OmniBioAI ecosystem.
-

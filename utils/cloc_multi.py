@@ -122,6 +122,7 @@ def main() -> int:
             Path("docker-compose.yml"),
             Path("start_stack_tmux.sh"),
             Path("smoke_test_stack.sh"),
+            Path("omnibioai_sdk"),
         ]
 
     # Validate

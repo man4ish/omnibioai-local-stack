@@ -1,5 +1,6 @@
 # ---- External repos (DO NOT TRACK) ----
 omnibioai/*
+omnibioai_sdk/*
 lims-x/*
 omnibioai-tool-exec/*
 omnibioai-toolserver/*
