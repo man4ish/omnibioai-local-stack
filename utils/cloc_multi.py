@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -28,7 +29,7 @@ EXCLUDE_DIRS = (
     "admin,venv,gnn_env,venv_sys,work,input"
 )
 EXCLUDE_EXTS = "svg,json,txt,csv,lock,min.js,map,md"
-NOT_MATCH_D  = r"(data|uploads|downloads|cache|results|logs)"
+NOT_MATCH_D = r"(data|uploads|downloads|cache|results|logs)"
 
 
 @dataclass
@@ -45,6 +46,17 @@ class Totals:
         self.code += other.code
 
 
+def print_header() -> None:
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print("\n" + "=" * 80)
+    print("OmniBioAI Platform — Codebase Statistics")
+    print("=" * 80)
+    print("Unified metrics across the OmniBioAI ecosystem")
+    print("Generated using cloc with strict exclusions (no vendored/runtime data)")
+    print(f"Timestamp: {ts}")
+    print("=" * 80)
+
+
 def run_cloc(path: Path) -> Tuple[Totals, Dict[str, Totals]]:
     """
     Returns:
@@ -54,10 +66,13 @@ def run_cloc(path: Path) -> Tuple[Totals, Dict[str, Totals]]:
     cmd = [
         "cloc",
         str(path),
-        "--exclude-dir", EXCLUDE_DIRS,
-        "--exclude-ext", EXCLUDE_EXTS,
+        "--exclude-dir",
+        EXCLUDE_DIRS,
+        "--exclude-ext",
+        EXCLUDE_EXTS,
         "--fullpath",
-        "--not-match-d", NOT_MATCH_D,
+        "--not-match-d",
+        NOT_MATCH_D,
         "--json",
     ]
 
@@ -104,6 +119,8 @@ def main() -> int:
         print("ERROR: cloc is not installed or not on PATH.", file=sys.stderr)
         print("Install: sudo apt-get install cloc  (or: conda install -c conda-forge cloc)", file=sys.stderr)
         return 2
+
+    print_header()
 
     # Default to the repos you showed (plus LIMS-X)
     if len(sys.argv) > 1:
