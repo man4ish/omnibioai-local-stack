@@ -6,7 +6,7 @@ What it does
 ------------
 1) Runs `cloc` (JSON) over multiple repos/files with strict excludes
 2) Produces an INTERACTIVE HTML report containing:
-   - Architecture diagram (interactive graph)
+   - Professional architecture flow diagram (layered boxes + arrows)
    - Project-wise contribution (pie + bar)
    - Language-wise contribution overall (pie + bar)
    - Summary tables (projects + languages)
@@ -14,10 +14,10 @@ What it does
 Usage
 -----
 # From repo root (e.g. ~/Desktop/machine):
-python utils/cloc_multi_report.py
+python utils/report_generator.py
 
 # Or specify paths:
-python utils/cloc_multi_report.py omnibioai omnibioai-tool-exec ragbio lims-x
+python utils/report_generator.py omnibioai omnibioai-tool-exec ragbio lims-x
 
 Requirements
 ------------
@@ -40,9 +40,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
-# Plotly (interactive HTML)
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 
 # ------------------------------------------------------------------------------
@@ -152,74 +150,112 @@ def validate_paths(paths: List[Path]) -> None:
 
 
 # ------------------------------------------------------------------------------
-# Architecture diagram (Plotly graph)
+# Architecture diagram (Professional flow diagram)
 # ------------------------------------------------------------------------------
-def build_architecture_spec(existing_projects: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
+def build_architecture_spec(existing_projects: List[str]) -> Tuple[List[str], List[Tuple[str, str]], Dict[str, str]]:
     """
+    Professional layered architecture spec.
+
     Returns:
       nodes: list of node ids (strings)
       edges: list of (src, dst)
-    Notes:
-      - This is intentionally opinionated but easy to adjust.
-      - It only includes nodes that exist in `existing_projects`.
+      node_layer: node -> layer name
     """
-    # Canonical node names we will use in the diagram.
-    # Keep these aligned with your repo folder names.
-    nodes_wanted = [
-        "omnibioai",              # Django workbench
-        "lims-x",                 # LIMS
-        "ragbio",                 # RAG assistant
-        "omnibioai-toolserver",   # FastAPI toolserver
-        "omnibioai-tool-exec",    # TES execution service
-        "omnibioai_sdk",          # SDK
-        "aws-tools",              # tool images / runners
-        "k8s",                    # infra
-        "ai-dev-docker",          # dev infra
-        "db-init",                # DB init/seed
-        "docker-compose.yml",
-        "start_stack_tmux.sh",
-        "smoke_test_stack.sh",
-    ]
+    layers = {
+        "Dev / Clients": [
+            "ai-dev-docker",
+            "omnibioai_sdk",
+        ],
+        "Workbench": [
+            "omnibioai",
+            "lims-x",
+            "ragbio",
+        ],
+        "Services": [
+            "omnibioai-toolserver",
+        ],
+        "Execution": [
+            "omnibioai-tool-exec",
+        ],
+        "Tool Runners": [
+            "aws-tools",
+        ],
+        "Infra / Ops": [
+            "k8s",
+            "db-init",
+            "docker-compose.yml",
+            "start_stack_tmux.sh",
+            "smoke_test_stack.sh",
+        ],
+    }
 
-    nodes = [n for n in nodes_wanted if n in existing_projects]
+    node_layer: Dict[str, str] = {}
+    nodes: List[str] = []
+    for layer_name, layer_nodes in layers.items():
+        for n in layer_nodes:
+            if n in existing_projects:
+                nodes.append(n)
+                node_layer[n] = layer_name
 
-    # Directed edges: "who uses who"
+    # Flow edges (left -> right). Keep this “diagrammatic”, not exhaustively accurate.
     edges_wanted = [
+        ("ai-dev-docker", "omnibioai"),
+        ("omnibioai_sdk", "omnibioai"),
+
         ("omnibioai", "lims-x"),
         ("omnibioai", "ragbio"),
         ("omnibioai", "omnibioai-toolserver"),
+
         ("omnibioai-toolserver", "omnibioai-tool-exec"),
         ("omnibioai-tool-exec", "aws-tools"),
-        ("omnibioai_sdk", "omnibioai"),
-        ("omnibioai_sdk", "omnibioai-toolserver"),
-        ("db-init", "omnibioai"),
-        ("k8s", "omnibioai"),
-        ("k8s", "omnibioai-toolserver"),
-        ("k8s", "omnibioai-tool-exec"),
-        ("ai-dev-docker", "omnibioai"),
+
+        # Infra edges (lightweight)
         ("docker-compose.yml", "omnibioai"),
         ("docker-compose.yml", "omnibioai-toolserver"),
         ("docker-compose.yml", "omnibioai-tool-exec"),
         ("start_stack_tmux.sh", "docker-compose.yml"),
         ("smoke_test_stack.sh", "docker-compose.yml"),
+        ("k8s", "omnibioai"),
+        ("k8s", "omnibioai-toolserver"),
+        ("k8s", "omnibioai-tool-exec"),
+        ("db-init", "omnibioai"),
     ]
+
     edges = [(a, b) for (a, b) in edges_wanted if a in nodes and b in nodes]
-    return nodes, edges
+    return nodes, edges, node_layer
 
 
-def circular_layout(nodes: List[str], radius: float = 1.0) -> Dict[str, Tuple[float, float]]:
+def layered_layout(nodes: List[str], node_layer: Dict[str, str]) -> Dict[str, Tuple[float, float]]:
     """
-    Simple deterministic layout to avoid extra deps (no networkx).
+    Deterministic layered layout (professional flow diagram).
+    Layers go left -> right; nodes are stacked within each layer.
     """
-    import math
+    layer_order = ["Dev / Clients", "Workbench", "Services", "Execution", "Tool Runners", "Infra / Ops"]
 
-    n = max(len(nodes), 1)
+    per_layer: Dict[str, List[str]] = {k: [] for k in layer_order}
+    for n in nodes:
+        per_layer.setdefault(node_layer.get(n, "Workbench"), []).append(n)
+
+    # Fixed x positions for layers (columns)
+    x_map = {layer: i * 3.1 for i, layer in enumerate(layer_order)}
+
     pos: Dict[str, Tuple[float, float]] = {}
-    for i, node in enumerate(nodes):
-        angle = 2 * math.pi * (i / n)
-        x = radius * math.cos(angle)
-        y = radius * math.sin(angle)
-        pos[node] = (x, y)
+
+    # y positions: stack nodes centered in each layer
+    for layer in layer_order:
+        items = per_layer.get(layer, [])
+        if not items:
+            continue
+
+        step = 1.25
+        total_height = (len(items) - 1) * step
+        y0 = total_height / 2.0
+
+        for idx, n in enumerate(items):
+            x = x_map[layer]
+            y = y0 - idx * step
+            pos[n] = (x, y)
+
     return pos
 
 
@@ -227,82 +263,177 @@ def architecture_figure(
     nodes: List[str],
     edges: List[Tuple[str, str]],
     project_totals: Dict[str, Totals],
+    node_layer: Dict[str, str],
 ) -> go.Figure:
     """
-    Interactive architecture diagram with:
-      - Node size proportional to code lines
-      - Hover shows project metrics
-      - Edges rendered as lines with arrow-like direction marker (lightweight)
+    Professional architecture diagram:
+      - Box nodes arranged in layers (left -> right)
+      - Arrows indicating flow/dependency
+      - Hover shows project stats (LOC/files)
     """
-    # Layout
-    pos = circular_layout(nodes, radius=1.0)
+    pos = layered_layout(nodes, node_layer)
 
-    # Node sizing: scale code lines into marker size
+    # Node sizing reference
     codes = [project_totals.get(n, Totals()).code for n in nodes]
     max_code = max(codes) if codes else 1
-    min_size, max_size = 18, 55
-    sizes = [
-        min_size + (max_size - min_size) * safe_div(c, max_code)
-        for c in codes
-    ]
 
-    # Edge traces (lines)
-    edge_x: List[float] = []
-    edge_y: List[float] = []
+    # Box dimensions (plot coords)
+    box_w = 1.45
+    box_h = 0.62
+
+    def box_fill(layer: str) -> str:
+        # Soft layer tints (kept subtle)
+        if layer == "Dev / Clients":
+            return "rgba(232, 244, 255, 0.95)"
+        if layer == "Workbench":
+            return "rgba(236, 255, 244, 0.95)"
+        if layer == "Services":
+            return "rgba(255, 246, 230, 0.95)"
+        if layer == "Execution":
+            return "rgba(255, 235, 238, 0.95)"
+        if layer == "Tool Runners":
+            return "rgba(245, 239, 255, 0.95)"
+        return "rgba(245, 245, 245, 0.95)"  # Infra / Ops
+
+    def loc_badge(code_lines: int) -> str:
+        return f"{fmt_int(code_lines)} LOC"
+
+    shapes: List[dict] = []
+    annotations: List[dict] = []
+
+    # Node boxes + labels
+    for n in nodes:
+        x, y = pos[n]
+        t = project_totals.get(n, Totals())
+        layer = node_layer.get(n, "")
+
+        # Box
+        shapes.append(
+            dict(
+                type="rect",
+                xref="x",
+                yref="y",
+                x0=x - box_w / 2,
+                x1=x + box_w / 2,
+                y0=y - box_h / 2,
+                y1=y + box_h / 2,
+                line=dict(width=1),
+                fillcolor=box_fill(layer),
+                layer="below",
+            )
+        )
+
+        # Main title
+        annotations.append(
+            dict(
+                x=x,
+                y=y + 0.08,
+                xref="x",
+                yref="y",
+                text=f"<b>{n}</b>",
+                showarrow=False,
+                font=dict(size=12),
+            )
+        )
+
+        # LOC line
+        annotations.append(
+            dict(
+                x=x,
+                y=y - 0.20,
+                xref="x",
+                yref="y",
+                text=loc_badge(t.code),
+                showarrow=False,
+                font=dict(size=10, color="#555"),
+            )
+        )
+
+    # Layer headings
+    layer_order = ["Dev / Clients", "Workbench", "Services", "Execution", "Tool Runners", "Infra / Ops"]
+    used_layers = [l for l in layer_order if any(node_layer.get(n) == l for n in nodes)]
+    y_top = max(pos[n][1] for n in nodes) + 1.15 if nodes else 2.0
+
+    for layer_name in used_layers:
+        xs = [pos[n][0] for n in nodes if node_layer.get(n) == layer_name]
+        if not xs:
+            continue
+        x = sum(xs) / len(xs)
+        annotations.append(
+            dict(
+                x=x,
+                y=y_top,
+                xref="x",
+                yref="y",
+                text=f"<b>{layer_name}</b>",
+                showarrow=False,
+                font=dict(size=13),
+            )
+        )
+
+    # Edges as arrows (annotations)
+    edge_annotations: List[dict] = []
     for a, b in edges:
         x0, y0 = pos[a]
         x1, y1 = pos[b]
-        edge_x += [x0, x1, None]
-        edge_y += [y0, y1, None]
+        edge_annotations.append(
+            dict(
+                x=x1 - box_w / 2,
+                y=y1,
+                ax=x0 + box_w / 2,
+                ay=y0,
+                xref="x",
+                yref="y",
+                axref="x",
+                ayref="y",
+                showarrow=True,
+                arrowhead=3,
+                arrowsize=1.0,
+                arrowwidth=1,
+                opacity=0.85,
+                text="",
+            )
+        )
 
-    edge_trace = go.Scatter(
-        x=edge_x,
-        y=edge_y,
-        line=dict(width=1),
-        hoverinfo="none",
-        mode="lines",
-        name="dependencies",
-    )
-
-    # Node trace
-    node_x = [pos[n][0] for n in nodes]
-    node_y = [pos[n][1] for n in nodes]
-
+    # Invisible scatter points to enable hover tooltips (since shapes don't hover)
+    node_x = []
+    node_y = []
     hover_text = []
     for n in nodes:
         t = project_totals.get(n, Totals())
         hover_text.append(
             f"<b>{n}</b><br>"
+            f"Layer: {node_layer.get(n,'')}<br>"
             f"Files: {fmt_int(t.files)}<br>"
             f"Blank: {fmt_int(t.blank)}<br>"
             f"Comment: {fmt_int(t.comment)}<br>"
             f"Code: {fmt_int(t.code)}"
         )
+        node_x.append(pos[n][0])
+        node_y.append(pos[n][1])
 
-    node_trace = go.Scatter(
-        x=node_x,
-        y=node_y,
-        mode="markers+text",
-        text=nodes,
-        textposition="top center",
-        hovertext=hover_text,
-        hoverinfo="text",
-        marker=dict(
-            size=sizes,
-            line=dict(width=1),
-            opacity=0.95,
-        ),
-        name="components",
+    fig = go.Figure(
+        data=[
+            go.Scatter(
+                x=node_x,
+                y=node_y,
+                mode="markers",
+                marker=dict(size=18, opacity=0.01),
+                hovertext=hover_text,
+                hoverinfo="text",
+                showlegend=False,
+            )
+        ]
     )
 
-    fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(
-        title="Architecture (interactive) — node size ~ code lines",
-        showlegend=False,
+        title="Architecture (professional flow) — layered platform view",
+        shapes=shapes,
+        annotations=annotations + edge_annotations,
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        margin=dict(l=20, r=20, t=60, b=20),
-        height=520,
+        margin=dict(l=20, r=20, t=70, b=20),
+        height=600,
     )
     return fig
 
@@ -311,9 +442,7 @@ def architecture_figure(
 # Charts + tables
 # ------------------------------------------------------------------------------
 def pie_figure(labels: List[str], values: List[int], title: str) -> go.Figure:
-    fig = go.Figure(
-        data=[go.Pie(labels=labels, values=values, hole=0.35)]
-    )
+    fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=0.35)])
     fig.update_layout(title=title, height=420, margin=dict(l=20, r=20, t=60, b=20))
     return fig
 
@@ -330,7 +459,7 @@ def bar_figure(x: List[str], y: List[int], title: str, ytitle: str = "Code lines
     return fig
 
 
-def table_figure(rows: List[Dict[str, Union[str, int]]], title: str) -> go.Figure:
+def table_figure(rows: List[Dict[str, Union[str, int, float]]], title: str) -> go.Figure:
     if not rows:
         return go.Figure()
 
@@ -360,19 +489,16 @@ def build_report(
     project_totals: Dict[str, Totals],
     language_totals: Dict[str, Totals],
 ) -> None:
-    # Sort projects by code desc
     proj_sorted = sorted(project_totals.items(), key=lambda kv: kv[1].code, reverse=True)
     proj_labels = [k for k, _ in proj_sorted]
     proj_values = [v.code for _, v in proj_sorted]
 
-    # Sort languages by code desc
     lang_sorted = sorted(language_totals.items(), key=lambda kv: kv[1].code, reverse=True)
     lang_labels = [k for k, _ in lang_sorted]
     lang_values = [v.code for _, v in lang_sorted]
 
-    # Figures
-    nodes, edges = build_architecture_spec(existing_projects=list(project_totals.keys()))
-    fig_arch = architecture_figure(nodes, edges, project_totals)
+    nodes, edges, node_layer = build_architecture_spec(existing_projects=list(project_totals.keys()))
+    fig_arch = architecture_figure(nodes, edges, project_totals, node_layer)
 
     fig_proj_pie = pie_figure(proj_labels, proj_values, "Project contribution (by code lines)")
     fig_proj_bar = bar_figure(proj_labels, proj_values, "Project contribution (bar)", "Code lines")
@@ -380,8 +506,7 @@ def build_report(
     fig_lang_pie = pie_figure(lang_labels[:14], lang_values[:14], "Top languages (by code lines)")
     fig_lang_bar = bar_figure(lang_labels[:20], lang_values[:20], "Top languages (bar)", "Code lines")
 
-    # Tables
-    proj_rows = []
+    proj_rows: List[Dict[str, Union[str, int, float]]] = []
     for name, t in proj_sorted:
         proj_rows.append(
             {
@@ -395,7 +520,7 @@ def build_report(
         )
     fig_proj_table = table_figure(proj_rows, "Per-project totals")
 
-    lang_rows = []
+    lang_rows: List[Dict[str, Union[str, int, float]]] = []
     for name, t in lang_sorted:
         lang_rows.append(
             {
@@ -409,11 +534,8 @@ def build_report(
         )
     fig_lang_table = table_figure(lang_rows, "Language totals (overall)")
 
-    # Combine into a single HTML report by concatenating figure HTML fragments.
-    # This avoids Dash and keeps it as a portable file.
     out_html.parent.mkdir(parents=True, exist_ok=True)
 
-    # Small HTML shell
     summary_html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 1200px; margin: 18px auto;">
       <h1 style="margin-bottom: 6px;">{title}</h1>
@@ -424,12 +546,13 @@ def build_report(
       <hr/>
       <h2>Architecture</h2>
       <p style="color:#555; margin-top: -6px;">
-        Interactive dependency view (opinionated). Node size is proportional to code lines; hover nodes for metrics.
+        Professional layered flow diagram. Hover components for metrics.
       </p>
     </div>
     """
 
-    # Plotly figure HTML fragments (include plotly.js once)
+    # Include plotly.js once via CDN (keeps report small).
+    # If you want fully portable/offline: change to include_plotlyjs="inline"
     arch_html = fig_arch.to_html(full_html=False, include_plotlyjs="cdn")
     proj_pie_html = fig_proj_pie.to_html(full_html=False, include_plotlyjs=False)
     proj_bar_html = fig_proj_bar.to_html(full_html=False, include_plotlyjs=False)
@@ -438,7 +561,6 @@ def build_report(
     proj_table_html = fig_proj_table.to_html(full_html=False, include_plotlyjs=False)
     lang_table_html = fig_lang_table.to_html(full_html=False, include_plotlyjs=False)
 
-    # Two-column responsive layout sections
     sections_html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 1200px; margin: 18px auto;">
       {arch_html}
@@ -467,7 +589,14 @@ def build_report(
     </div>
     """
 
-    full_html = f"<!doctype html><html><head><meta charset='utf-8'><title>{title}</title></head><body>{summary_html}{sections_html}</body></html>"
+    full_html = (
+        "<!doctype html>"
+        "<html><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        "</head><body>"
+        f"{summary_html}{sections_html}"
+        "</body></html>"
+    )
     out_html.write_text(full_html, encoding="utf-8")
 
 
@@ -480,7 +609,6 @@ def main() -> int:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     title = "OmniBioAI Platform — Architecture + Codebase Statistics (Interactive)"
 
-    # Default dirs (same spirit as your current script)
     if len(sys.argv) > 1:
         targets = [Path(p) for p in sys.argv[1:]]
     else:
