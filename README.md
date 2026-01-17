@@ -41,57 +41,7 @@ Desktop/machine/
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  %% Clients
-  U[User / Browser]
-  Dev[Developer CLI / SDK]
-
-  %% Application Services
-  subgraph Apps[Application Services]
-    WB[OmniBioAI Workbench\nDjango + ASGI + Channels\nPort 8000]
-    LS[LIMS-X\nDjango\nPort 7000]
-    TS[ToolServer\nFastAPI + Uvicorn\nPort 9090]
-    TES[TES\nTool Execution Service\nPort 8080]
-  end
-
-  %% Infrastructure
-  subgraph Infra[Infrastructure]
-    MySQL[MySQL 8\nDatabases: omnibioai, limsdb\nPort 3306]
-    Redis[Redis\nCelery + Channels\nPort 6379]
-  end
-
-  %% Shared Workspace
-  subgraph Storage[Shared Workspace]
-    WS[Workspace Root\nDocker: /workspace\nLocal: Desktop/machine]
-    Runs[Workflow Runs and Outputs]
-    Registry[Registries and Provenance\nRelative paths only]
-  end
-
-  %% Client traffic
-  U --> WB
-  Dev --> WB
-  Dev --> TS
-  Dev --> TES
-
-  %% Service interactions
-  WB --> TES
-  TES --> TS
-
-  %% Data plane
-  WB --> MySQL
-  LS --> MySQL
-  WB --> Redis
-  TES --> Redis
-
-  %% Shared filesystem
-  WB --> WS
-  LS --> WS
-  TS --> WS
-  TES --> WS
-  WS --> Runs
-  WS --> Registry
-```
+![Architecture](ecosystem.png)
 
 ---
 
