@@ -41,7 +41,7 @@ Desktop/machine/
 
 ## Architecture
 
-![Architecture](ecosystem.png)
+![Architecture](images/ecosystem.png)
 
 ---
 
